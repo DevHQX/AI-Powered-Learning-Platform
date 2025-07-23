@@ -134,7 +134,6 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser to view the project.
-<a href="https://jsm.dev/converso-kit" target="_blank">
   <img src="public/readme/videokit.jpg" alt="Video Kit Banner">
 </a>
 
