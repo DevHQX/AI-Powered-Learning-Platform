@@ -67,7 +67,31 @@ const CompanionComponent = ({ companionId, subject, topic, name, userName, userI
             vapi.off('error', onError);
             vapi.off('speech-start', onSpeechStart);
             vapi.off('speech-end', onSpeechEnd);
+            // Ensure the call is fully stopped when the component unmounts
+            try {
+                vapi.stop();
+            } catch (e) {
+                // no-op
+            }
         }
+    }, []);
+
+    // Stop the session when the tab is hidden or the page is unloading
+    useEffect(() => {
+        const handleVisibilityOrUnload = () => {
+            if (document.hidden) {
+                try {
+                    vapi.stop();
+                } catch {}
+                setCallStatus(CallStatus.FINISHED);
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityOrUnload);
+        window.addEventListener('beforeunload', handleVisibilityOrUnload);
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityOrUnload);
+            window.removeEventListener('beforeunload', handleVisibilityOrUnload);
+        };
     }, []);
 
     const toggleMicrophone = () => {

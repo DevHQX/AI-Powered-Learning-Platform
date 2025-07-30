@@ -4,18 +4,41 @@ import {auth} from "@clerk/nextjs/server";
 import {createSupabaseClient} from "@/lib/supabase";
 import { revalidatePath } from "next/cache";
 
+// Normalize Supabase companion rows (PascalCase columns) to app-wide camelCase
+const normalizeCompanion = (row: any) => ({
+    id: row.id,
+    name: row.Name,
+    subject: row.Subject,
+    topic: row.Topic,
+    voice: row.Voice,
+    style: row.Style,
+    duration: row.Duration,
+    author: row.Author,
+    bookmarked: Boolean(row.Bookmark),
+});
+
 export const createCompanion = async (formData: CreateCompanion) => {
     const { userId: author } = await auth();
     const supabase = createSupabaseClient();
 
     const { data, error } = await supabase
         .from('companions')
-        .insert({...formData, author })
+        .insert({
+            // Map incoming camelCase to your Supabase PascalCase columns
+            Name: formData.name,
+            Subject: formData.subject,
+            Topic: formData.topic,
+            Voice: formData.voice,
+            Style: formData.style,
+            Duration: formData.duration,
+            Author: author,
+            Bookmark: false,
+        })
         .select();
 
     if(error || !data) throw new Error(error?.message || 'Failed to create a companion');
 
-    return data[0];
+    return normalizeCompanion(data[0]);
 }
 
 export const getAllCompanions = async ({ limit = 10, page = 1, subject, topic }: GetAllCompanions) => {
@@ -23,13 +46,13 @@ export const getAllCompanions = async ({ limit = 10, page = 1, subject, topic }:
 
     let query = supabase.from('companions').select();
 
-    if(subject && topic) {
-        query = query.ilike('subject', `%${subject}%`)
-            .or(`topic.ilike.%${topic}%,name.ilike.%${topic}%`)
-    } else if(subject) {
-        query = query.ilike('subject', `%${subject}%`)
-    } else if(topic) {
-        query = query.or(`topic.ilike.%${topic}%,name.ilike.%${topic}%`)
+    if (subject && topic) {
+        query = query.ilike('Subject', `%${subject}%`)
+            .or(`Topic.ilike.%${topic}%,Name.ilike.%${topic}%`)
+    } else if (subject) {
+        query = query.ilike('Subject', `%${subject}%`)
+    } else if (topic) {
+        query = query.or(`Topic.ilike.%${topic}%,Name.ilike.%${topic}%`)
     }
 
     query = query.range((page - 1) * limit, page * limit - 1);
@@ -38,7 +61,7 @@ export const getAllCompanions = async ({ limit = 10, page = 1, subject, topic }:
 
     if(error) throw new Error(error.message);
 
-    return companions;
+    return (companions || []).map(normalizeCompanion);
 }
 
 export const getCompanion = async (id: string) => {
@@ -51,7 +74,7 @@ export const getCompanion = async (id: string) => {
 
     if(error) return console.log(error);
 
-    return data[0];
+    return data?.[0] ? normalizeCompanion(data[0]) : undefined;
 }
 
 export const addToSessionHistory = async (companionId: string) => {
@@ -78,7 +101,7 @@ export const getRecentSessions = async (limit = 10) => {
 
     if(error) throw new Error(error.message);
 
-    return data.map(({ companions }) => companions);
+    return (data || []).map(({ companions }) => normalizeCompanion(companions));
 }
 
 export const getUserSessions = async (userId: string, limit = 10) => {
@@ -92,7 +115,7 @@ export const getUserSessions = async (userId: string, limit = 10) => {
 
     if(error) throw new Error(error.message);
 
-    return data.map(({ companions }) => companions);
+    return (data || []).map(({ companions }) => normalizeCompanion(companions));
 }
 
 export const getUserCompanions = async (userId: string) => {
@@ -100,11 +123,11 @@ export const getUserCompanions = async (userId: string) => {
     const { data, error } = await supabase
         .from('companions')
         .select()
-        .eq('author', userId)
+        .eq('Author', userId)
 
     if(error) throw new Error(error.message);
 
-    return data;
+    return (data || []).map(normalizeCompanion);
 }
 
 export const newCompanionPermissions = async () => {
@@ -124,7 +147,7 @@ export const newCompanionPermissions = async () => {
     const { data, error } = await supabase
         .from('companions')
         .select('id', { count: 'exact' })
-        .eq('author', userId)
+        .eq('Author', userId)
 
     if(error) throw new Error(error.message);
 
@@ -142,47 +165,43 @@ export const addBookmark = async (companionId: string, path: string) => {
   const { userId } = await auth();
   if (!userId) return;
   const supabase = createSupabaseClient();
-  const { data, error } = await supabase.from("bookmarks").insert({
-    companion_id: companionId,
-    user_id: userId,
-  });
+  const { error } = await supabase
+    .from("companions")
+    .update({ Bookmark: true })
+    .eq("id", companionId);
   if (error) {
     throw new Error(error.message);
   }
   // Revalidate the path to force a re-render of the page
 
   revalidatePath(path);
-  return data;
 };
 
 export const removeBookmark = async (companionId: string, path: string) => {
   const { userId } = await auth();
   if (!userId) return;
   const supabase = createSupabaseClient();
-  const { data, error } = await supabase
-    .from("bookmarks")
-    .delete()
-    .eq("companion_id", companionId)
-    .eq("user_id", userId);
+  const { error } = await supabase
+    .from("companions")
+    .update({ Bookmark: false })
+    .eq("id", companionId);
   if (error) {
     throw new Error(error.message);
   }
   revalidatePath(path);
-  return data;
 };
 
 // It's almost the same as getUserCompanions, but it's for the bookmarked companions
 export const getBookmarkedCompanions = async (userId: string) => {
   const supabase = createSupabaseClient();
   const { data, error } = await supabase
-    .from("bookmarks")
-    .select(`companions:companion_id (*)`) // Notice the (*) to get all the companion data
-    .eq("user_id", userId);
+    .from("companions")
+    .select()
+    .eq("Bookmark", true);
   if (error) {
     throw new Error(error.message);
   }
-  // We don't need the bookmarks data, so we return only the companions
-  return data.map(({ companions }) => companions);
+  return (data || []).map(normalizeCompanion);
 };
 
 
